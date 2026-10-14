@@ -1,39 +1,85 @@
+// src/server.ts — QA Copilot Framework: full API + dashboard
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import { FRAMEWORK_CONFIG } from "./config.js";
+import { parseTest, describeSpec } from "./ai/nl-to-test.js";
+import { healSelector } from "./ai/self-healer.js";
+import type { DomElement } from "./ai/self-healer.js";
+import { generateCode } from "./languages/language-adapter.js";
+import { runSpec, summarizeSuite } from "./core/runner.js";
+import type { TestSpec } from "./types.js";
+import { list, register, clear } from "./plugins/plugin-registry.js";
+import { collectMetrics, formatPerfReport } from "./capabilities/performance.js";
+import { runA11yChecks, getRules } from "./capabilities/accessibility.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
 const startedAt = Date.now();
-let tick = 0;
-const languages = ["TypeScript", "Python", "Java", "Go", "Rust"];
-const features = [
-  { name: "Self-healing locators", icon: "🔧", enabled: true },
-  { name: "NL → test steps", icon: "💬", enabled: true },
-  { name: "Record / replay", icon: "🎥", enabled: true },
-  { name: "Visual regression", icon: "👁", enabled: true },
-  { name: "API testing", icon: "🔌", enabled: true },
-  { name: "Performance", icon: "⚡", enabled: true },
-  { name: "Accessibility (axe)", icon: "♿", enabled: true },
-  { name: "Multi-language", icon: "🌐", enabled: true },
-];
-const plugins = [
-  { name: "@qa-copilot/playwright", downloads: 48200, stars: 2100 },
-  { name: "@qa-copilot/jest", downloads: 31100, stars: 1400 },
-  { name: "@qa-copilot/pytest", downloads: 27800, stars: 980 },
-  { name: "@qa-copilot/vscode", downloads: 19400, stars: 1650 },
-  { name: "@qa-copilot/visual", downloads: 12300, stars: 720 },
-];
-function sim() {
-  tick++;
-  const nlExamples = [
-    { nl: "login as admin, go to settings, toggle 2FA", generated: "test('2FA toggle', async ({page}) => { await page.goto('/login'); await page.fill('#email','admin@x'); await page.fill('#pass','...'); await page.click('button:has-text(\"Login\")'); await page.click('nav >> text=Settings'); await page.click('[data-testid=2fa-toggle]'); await expect(page.locator('.toast')).toContainText('enabled'); });" },
-    { nl: "add 3 items to cart, verify total", generated: "test('cart total', async ({page}) => { for (const i of [1,2,3]) { await page.click(`.product:nth-child(${i}) button:has-text(\"Add\")`); } const total = await page.locator('.cart-total').textContent(); expect(parseFloat(total.replace('$',''))).toBeGreaterThan(0); });" },
-  ];
-  return { languages, features, plugins, nlExamples, healedToday: 14 + tick, stars: 5400 + tick, downloads: 139000 + tick * 50 };
-}
-app.get("/api/status", (_q, r) => r.json({ ok: true, uptime: Math.round((Date.now() - startedAt) / 1000), ...sim() }));
-app.get("/health", (_q, r) => r.json({ ok: true }));
+
+// Register some demo plugins
+register({ name: "@qa-copilot/playwright", version: "1.0.0", capabilities: ["ui", "visual", "a11y"] });
+register({ name: "@qa-copilot/api", version: "1.0.0", capabilities: ["api"] });
+register({ name: "@qa-copilot/perf", version: "1.0.0", capabilities: ["performance"] });
+
+app.get("/health", (_q,r) => r.json({ ok: true, version: FRAMEWORK_CONFIG.version, uptime: Math.round((Date.now()-startedAt)/1000) }));
+
+app.get("/api/status", (_q,r) => {
+  r.json({
+    ok: true,
+    stars: FRAMEWORK_CONFIG.stars,
+    healedToday: FRAMEWORK_CONFIG.healedToday,
+    languages: FRAMEWORK_CONFIG.languages,
+    plugins: list().map(p => ({ name: p.name, version: p.version, capabilities: p.capabilities })),
+    capabilities: ["self-heal", "nl-steps", "record-replay", "visual", "api", "perf", "a11y", "multi-lang"],
+  });
+});
+
+app.post("/api/nl-to-test", (req,r) => {
+  const { name = "AI Test", steps } = req.body || {};
+  if (!steps) return r.status(400).json({ error: "steps required" });
+  const spec = parseTest(name, steps);
+  r.json({ spec, description: describeSpec(spec) });
+});
+
+app.post("/api/self-heal", (req,r) => {
+  const { selector, dom } = req.body || {};
+  if (!selector || !Array.isArray(dom)) return r.status(400).json({ error: "selector + dom array required" });
+  const result = healSelector(selector, dom as DomElement[]);
+  r.json({ result });
+});
+
+app.post("/api/generate-code", (req,r) => {
+  const { spec, language = "typescript" } = req.body || {};
+  if (!spec) return r.status(400).json({ error: "spec required" });
+  const code = generateCode(spec as TestSpec, language);
+  r.json({ code, language });
+});
+
+app.post("/api/run", async (req,r) => {
+  const { specs } = req.body || {};
+  if (!Array.isArray(specs)) return r.status(400).json({ error: "specs array required" });
+  const results = await Promise.all(specs.map((s: TestSpec) => runSpec(s)));
+  r.json({ results, summary: summarizeSuite(results) });
+});
+
+app.get("/api/perf", (_q,r) => {
+  const metrics = collectMetrics();
+  r.json({ metrics, report: formatPerfReport(metrics) });
+});
+
+app.post("/api/a11y", (req,r) => {
+  const { elements = [] } = req.body || {};
+  const result = runA11yChecks(elements);
+  r.json(result);
+});
+
+app.get("/api/a11y/rules", (_q,r) => r.json({ rules: getRules() }));
+app.get("/api/plugins", (_q,r) => r.json({ plugins: list() }));
+
 app.use(express.static(path.join(__dirname, "../public")));
-app.get("/", (_q, r) => r.sendFile(path.join(__dirname, "../public/index.html")));
-app.listen(Number(process.env.PORT ?? 4304), () => console.log("qa-copilot → http://localhost:4304"));
+app.get("/", (_q,r) => r.sendFile(path.join(__dirname, "../public/index.html")));
+
+app.listen(Number(process.env.PORT ?? FRAMEWORK_CONFIG.defaultPort), () =>
+  console.log(`qa-copilot-framework → http://localhost:${FRAMEWORK_CONFIG.defaultPort}`));

@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  browserless:
+    image: browserless/chrome:latest
+    ports: ["3000:3000"]
+    environment:
+      TOKEN: qa-copilot
+      MAX_CONCURRENT_SESSIONS: 10
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    ports: ["8080:8080"]
