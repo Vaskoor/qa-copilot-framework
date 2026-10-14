@@ -24,7 +24,7 @@ const PATTERNS: Pattern[] = [
   // request: "send GET to /api/users"
   { re: /^(?:send|make)\s+(GET|POST|PUT|DELETE|PATCH)\s+(?:to\s+)?(.+)$/i, build: (m) => ({ kind: "request", method: m[1], url: m[2] }) },
   // wait: "wait 3 seconds", "wait for .toast"
-  { re: /^wait\s+(?:for\s+)?(.+)$/i, build: (m) => /^\d+$/.test(m[1]) ? { kind: "wait", timeoutMs: parseInt(m[1]) * 1000 } : { kind: "wait", selector: m[1], timeoutMs: 5000 } }),
+  { re: /^wait\s+(?:for\s+)?(.+)$/i, build: (m) => { const num = m[1].match(/^(\d+)/); return num ? { kind: "wait" as const, timeoutMs: parseInt(num[1]) * 1000 } : { kind: "wait" as const, selector: m[1], timeoutMs: 5000 }; } }),
   // screenshot: "take screenshot"
   { re: /^(?:take|capture)\s+screenshot$/i, build: () => ({ kind: "screenshot" }) },
   // login shortcut: "login as admin"
