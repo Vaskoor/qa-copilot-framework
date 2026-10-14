@@ -29,14 +29,14 @@ describe("self-healer — extractKeyword", () => {
 
 describe("self-healer — healSelector", () => {
   test("heals by text content", () => {
-    const result = healSelector("#missing-btn", dom);
+    const result = healSelector("#login-btn", dom);
     assert.ok(result);
     assert.equal(result!.strategy, "text");
     assert.ok(result!.proposed.includes("text="));
     assert.ok(result!.applied);
   });
   test("heals by aria-label", () => {
-    const result = healSelector("#missing-email", dom);
+    const result = healSelector("#email-input", dom);
     assert.ok(result);
     assert.ok(result!.confidence >= 0.8);
   });
